@@ -1,23 +1,41 @@
 from concurrent.futures import ThreadPoolExecutor
 from models.openai_model import openai_response
-from models.llama_model import llama_response
 from models.geminiai_model import gemini_response
+from models.llama_model import llama_response
+from utils.metrics import log_metrics
+import time
 
-def run_parallel(prompt: str):
+MODEL_FUNCTIONS = {
+    "chatgpt": openai_response,
+    "gemini": gemini_response,
+    "llama": llama_response
+}
+def run_parallel(prompt, models):
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {
-            "chatGPT": executor.submit(openai_response, prompt),
-            "llama": executor.submit(llama_response, prompt),
-            "gemini": executor.submit(gemini_response, prompt),
-            
-        }
-        for model,future in futures:
-            
+
+    def call_model(model_name):
+        key = model_name.lower()  
+        start_time = time.time()
+        if key in MODEL_FUNCTIONS:
             try:
-                result = future.result()
-                results[model] = result
+                response = MODEL_FUNCTIONS[key](prompt)
             except Exception as e:
-                results[model] = f"Error: {str(e)}"
+                response = f"Error: {e}"
+        else:
+            response = f"Model {model_name} not supported."
+
+        elapsed = time.time() - start_time
+        log_metrics(model_name, elapsed, len(response))
+        return response
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=len(models)) as executor:
+        futures = {model: executor.submit(call_model, model) for model in models}
+
+        for model, future in futures.items():
+            try:
+                results[model] = future.result()
+            except Exception as e:
+                results[model] = f"Unexpected error: {e}"
 
     return results
